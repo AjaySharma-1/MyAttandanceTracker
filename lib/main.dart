@@ -40,8 +40,9 @@ class AttendanceTrackerApp extends StatelessWidget {
 String generateUuid() {
   final math.Random random = math.Random();
   final int millis = DateTime.now().microsecondsSinceEpoch;
-  String part(int n) =>
-      List<int>.generate(n, (_) => random.nextInt(16)).map((v) => v.toRadixString(16)).join();
+  String part(int n) => List<int>.generate(n, (_) => random.nextInt(16))
+      .map((v) => v.toRadixString(16))
+      .join();
   return '${part(8)}-${part(4)}-4${part(3)}-${(8 + random.nextInt(4)).toRadixString(16)}${part(3)}-${millis.toRadixString(16).substring(0, 12)}';
 }
 
@@ -65,9 +66,11 @@ class AttendanceRecord {
         'notes': notes,
       };
 
-  factory AttendanceRecord.fromJson(Map<String, dynamic> json) => AttendanceRecord(
+  factory AttendanceRecord.fromJson(Map<String, dynamic> json) =>
+      AttendanceRecord(
         id: json['id'] as String?,
-        date: DateTime.fromMillisecondsSinceEpoch((json['dateMs'] as num).toInt()),
+        date: DateTime.fromMillisecondsSinceEpoch(
+            (json['dateMs'] as num).toInt()),
         isPresent: (json['isPresent'] as bool?) ?? false,
         notes: (json['notes'] as String?) ?? '',
       );
@@ -111,7 +114,8 @@ class Subject {
         targetPercentage: (json['targetPercentage'] as num?)?.toInt() ?? 75,
         colorHex: (json['colorHex'] as String?) ?? '#1F4AA8',
         records: ((json['records'] as List<dynamic>?) ?? <dynamic>[])
-            .map((dynamic e) => AttendanceRecord.fromJson(e as Map<String, dynamic>))
+            .map((dynamic e) =>
+                AttendanceRecord.fromJson(e as Map<String, dynamic>))
             .toList(),
       );
 }
@@ -123,13 +127,41 @@ class AttendanceHomePage extends StatefulWidget {
   State<AttendanceHomePage> createState() => _AttendanceHomePageState();
 }
 
-class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProviderStateMixin {
+class _AttendanceHomePageState extends State<AttendanceHomePage>
+    with TickerProviderStateMixin {
   static const String _prefsKey = 'subjects_db_v1';
-  static const String _lastLowAttendanceReminderDateKey = 'last_low_attendance_reminder_date';
+  static const String _lastLowAttendanceReminderDateKey =
+      'last_low_attendance_reminder_date';
   late final TabController _tabController;
   final List<Subject> _subjects = <Subject>[];
   String _logFilterSubjectId = 'all';
   String _logStatusFilter = 'all';
+  final List<Map<String, String>> _defaultSubjects = <Map<String, String>>[
+    <String, String>{
+      'name': 'ELECTRICAL DRIVES',
+      'instructor': 'Nikhil Gautam'
+    },
+    <String, String>{
+      'name': 'ELECTRICITY MARKET',
+      'instructor': 'Pankaj k. Rauniyar'
+    },
+    <String, String>{
+      'name': 'INDUSTRIAL ELECTRIFICATION',
+      'instructor': 'Rajandra Dahal'
+    },
+    <String, String>{
+      'name': 'ENGINEERING ECONOMICS',
+      'instructor': 'Chandra kumar Bhattrai'
+    },
+    <String, String>{
+      'name': 'ELECTRIC POWER DISTRIBUTION SYSTEM',
+      'instructor': 'Manish Pyakural'
+    },
+    <String, String>{
+      'name': 'INDUSTRIAL INSTRUMENTATION AND AUTOMATION',
+      'instructor': 'pkm',
+    },
+  ];
 
   @override
   void initState() {
@@ -142,13 +174,18 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? raw = prefs.getString(_prefsKey);
     if (raw == null || raw.trim().isEmpty) {
+      _subjects
+        ..clear()
+        ..addAll(_buildDefaultSubjects());
+      await _saveSubjects();
       if (mounted) setState(() {});
       return;
     }
     final List<dynamic> list = jsonDecode(raw) as List<dynamic>;
     _subjects
       ..clear()
-      ..addAll(list.map((dynamic e) => Subject.fromJson(e as Map<String, dynamic>)));
+      ..addAll(
+          list.map((dynamic e) => Subject.fromJson(e as Map<String, dynamic>)));
     if (mounted) setState(() {});
     _showLowAttendanceReminderIfNeeded();
   }
@@ -164,14 +201,64 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
     return '${now.year}-${now.month}-${now.day}';
   }
 
+  List<Subject> _buildDefaultSubjects() {
+    return List<Subject>.generate(_defaultSubjects.length, (int index) {
+      final Map<String, String> item = _defaultSubjects[index];
+      return Subject(
+        name: item['name'] ?? '',
+        code: '',
+        instructor: item['instructor'] ?? '',
+        targetPercentage: 75,
+        colorHex: colorsHex[index % colorsHex.length],
+      );
+    });
+  }
+
+  List<AttendanceRecord> _buildInitialRecords(
+      {required int present, required int absent}) {
+    final int safePresent = present < 0 ? 0 : present;
+    final int safeAbsent = absent < 0 ? 0 : absent;
+    final List<AttendanceRecord> generated = <AttendanceRecord>[];
+    final DateTime base = DateTime.now();
+    final int total = safePresent + safeAbsent;
+
+    for (int i = 0; i < total; i++) {
+      final DateTime date = base.subtract(Duration(days: total - i));
+      generated.add(AttendanceRecord(date: date, isPresent: i < safePresent));
+    }
+    return generated;
+  }
+
+  String _subjectDisplay(Subject s) {
+    final String name = s.name.trim();
+    if (name.isNotEmpty) return name;
+    return s.code.trim().isEmpty ? 'Untitled Subject' : s.code.trim();
+  }
+
+  String _subjectShort(Subject s) {
+    final List<String> parts = _subjectDisplay(s)
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return 'SU';
+    if (parts.length == 1) {
+      final String word = parts.first.toUpperCase();
+      return word.substring(0, math.min(2, word.length));
+    }
+    return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+  }
+
   Future<void> _showLowAttendanceReminderIfNeeded({bool force = false}) async {
     if (!mounted) return;
-    final List<Subject> lagging = _subjects.where((s) => _subjectPercent(s) < s.targetPercentage).toList();
+    final List<Subject> lagging = _subjects
+        .where((s) => _subjectPercent(s) < s.targetPercentage)
+        .toList();
     if (lagging.isEmpty) return;
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String today = _todayKey();
-    final String? lastReminder = prefs.getString(_lastLowAttendanceReminderDateKey);
+    final String? lastReminder =
+        prefs.getString(_lastLowAttendanceReminderDateKey);
 
     if (!force && lastReminder == today) return;
 
@@ -196,11 +283,12 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                 ...lagging.take(4).map((s) => Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: Text(
-                        '${s.code}: ${_subjectPercent(s).toStringAsFixed(1)}% / target ${s.targetPercentage}%\n${_advisoryText(s)}',
+                        '${_subjectDisplay(s)}: ${_subjectPercent(s).toStringAsFixed(1)}% / target ${s.targetPercentage}%\n${_advisoryText(s)}',
                         style: const TextStyle(fontSize: 13),
                       ),
                     )),
-                if (lagging.length > 4) Text('+${lagging.length - 4} more subject(s)'),
+                if (lagging.length > 4)
+                  Text('+${lagging.length - 4} more subject(s)'),
               ],
             ),
           ),
@@ -227,7 +315,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
 
   void _markAttendance(Subject subject, bool present) {
     final DateTime now = DateTime.now();
-    final bool alreadyExists = subject.records.any((r) => _sameCalendarDay(r.date, now));
+    final bool alreadyExists =
+        subject.records.any((r) => _sameCalendarDay(r.date, now));
     if (alreadyExists) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -243,7 +332,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
     _saveSubjects();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Checked in! You ${present ? "attended" : "missed"} ${subject.code} today.'),
+        content: Text(
+            'Checked in! You ${present ? "attended" : "missed"} ${_subjectDisplay(subject)} today.'),
       ),
     );
   }
@@ -271,27 +361,39 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
     if (conducted == 0) return 'No lectures recorded yet.';
     final double currentRate = (attended / conducted) * 100;
     if (currentRate >= s.targetPercentage) {
-      final double safe = ((100 * attended) - (s.targetPercentage * conducted)) / s.targetPercentage;
+      final double safe =
+          ((100 * attended) - (s.targetPercentage * conducted)) /
+              s.targetPercentage;
       final int safeToMiss = safe.floor();
       return 'Safe to skip next ${safeToMiss < 0 ? 0 : safeToMiss} class(es).';
     }
-    final double numerator = (s.targetPercentage * conducted) - (100 * attended).toDouble();
+    final double numerator =
+        (s.targetPercentage * conducted) - (100 * attended).toDouble();
     final double denominator = (100 - s.targetPercentage).toDouble();
     final int streak = denominator <= 0 ? 0 : (numerator / denominator).ceil();
     return 'Attend next $streak consecutively to hit ${s.targetPercentage}% target.';
   }
 
   Color _advisoryColor(Subject s) {
-    return _subjectPercent(s) >= s.targetPercentage ? Colors.green.shade700 : Colors.red.shade700;
+    return _subjectPercent(s) >= s.targetPercentage
+        ? Colors.green.shade700
+        : Colors.red.shade700;
   }
 
-  int get _overallConducted => _subjects.fold(0, (p, s) => p + s.records.length);
-  int get _overallAttended => _subjects.fold(0, (p, s) => p + s.records.where((r) => r.isPresent).length);
+  int get _overallConducted =>
+      _subjects.fold(0, (p, s) => p + s.records.length);
+  int get _overallAttended => _subjects.fold(
+      0, (p, s) => p + s.records.where((r) => r.isPresent).length);
 
   Future<void> _showCreateOrEditSubject({Subject? existing}) async {
-    final TextEditingController nameCtl = TextEditingController(text: existing?.name ?? '');
-    final TextEditingController codeCtl = TextEditingController(text: existing?.code ?? '');
-    final TextEditingController teacherCtl = TextEditingController(text: existing?.instructor ?? '');
+    final TextEditingController nameCtl =
+        TextEditingController(text: existing?.name ?? '');
+    final TextEditingController teacherCtl =
+        TextEditingController(text: existing?.instructor ?? '');
+    final TextEditingController initialPresentCtl =
+        TextEditingController(text: '0');
+    final TextEditingController initialAbsentCtl =
+        TextEditingController(text: '0');
     int target = existing?.targetPercentage ?? 75;
     String selectedHex = existing?.colorHex ?? colorsHex.first;
     await showModalBottomSheet<void>(
@@ -299,7 +401,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
       isScrollControlled: true,
       builder: (BuildContext ctx) {
         return StatefulBuilder(
-          builder: (BuildContext context, void Function(void Function()) setModal) {
+          builder:
+              (BuildContext context, void Function(void Function()) setModal) {
             return Padding(
               padding: EdgeInsets.only(
                 left: 16,
@@ -312,23 +415,56 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(existing == null ? 'Register New Course' : 'Edit Course',
+                    Text(
+                        existing == null
+                            ? 'Register New Course'
+                            : 'Edit Course',
                         style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 12),
-                    TextField(controller: nameCtl, decoration: const InputDecoration(labelText: 'Subject Name')),
+                    TextField(
+                        controller: nameCtl,
+                        decoration:
+                            const InputDecoration(labelText: 'Subject Name')),
                     const SizedBox(height: 8),
-                    TextField(controller: codeCtl, decoration: const InputDecoration(labelText: 'Course Code')),
-                    const SizedBox(height: 8),
-                    TextField(controller: teacherCtl, decoration: const InputDecoration(labelText: 'Instructor')),
+                    TextField(
+                        controller: teacherCtl,
+                        decoration:
+                            const InputDecoration(labelText: 'Instructor')),
+                    if (existing == null) ...<Widget>[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: TextField(
+                              controller: initialPresentCtl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                  labelText: 'Initial Present'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextField(
+                              controller: initialAbsentCtl,
+                              keyboardType: TextInputType.number,
+                              decoration: const InputDecoration(
+                                  labelText: 'Initial Absent'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 12),
-                    Text('Target: $target%', style: Theme.of(context).textTheme.titleMedium),
+                    Text('Target: $target%',
+                        style: Theme.of(context).textTheme.titleMedium),
                     Slider(
                       value: target.toDouble(),
                       min: 50,
                       max: 100,
                       divisions: 50,
                       label: '$target%',
-                      onChanged: (double v) => setModal(() => target = v.round()),
+                      onChanged: (double v) =>
+                          setModal(() => target = v.round()),
                     ),
                     const SizedBox(height: 8),
                     Wrap(
@@ -345,7 +481,9 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                               shape: BoxShape.circle,
                               color: colorFromHex(hex),
                               border: Border.all(
-                                color: selected ? Colors.black : Colors.transparent,
+                                color: selected
+                                    ? Colors.black
+                                    : Colors.transparent,
                                 width: 2,
                               ),
                             ),
@@ -356,22 +494,28 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () {
-                        if (nameCtl.text.trim().isEmpty || codeCtl.text.trim().isEmpty) return;
+                        if (nameCtl.text.trim().isEmpty) return;
+                        final int initialPresent =
+                            int.tryParse(initialPresentCtl.text.trim()) ?? 0;
+                        final int initialAbsent =
+                            int.tryParse(initialAbsentCtl.text.trim()) ?? 0;
                         setState(() {
                           if (existing == null) {
                             _subjects.add(
                               Subject(
                                 name: nameCtl.text.trim(),
-                                code: codeCtl.text.trim(),
+                                code: '',
                                 instructor: teacherCtl.text.trim(),
                                 targetPercentage: target,
                                 colorHex: selectedHex,
+                                records: _buildInitialRecords(
+                                    present: initialPresent,
+                                    absent: initialAbsent),
                               ),
                             );
                           } else {
                             existing
                               ..name = nameCtl.text.trim()
-                              ..code = codeCtl.text.trim()
                               ..instructor = teacherCtl.text.trim()
                               ..targetPercentage = target
                               ..colorHex = selectedHex;
@@ -380,7 +524,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                         _saveSubjects();
                         Navigator.pop(ctx);
                       },
-                      child: Text(existing == null ? 'Create Course' : 'Save Changes'),
+                      child: Text(
+                          existing == null ? 'Create Course' : 'Save Changes'),
                     ),
                   ],
                 ),
@@ -392,8 +537,10 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
     );
   }
 
-  Future<void> _showEditRecordSheet(Subject subject, AttendanceRecord record) async {
-    final TextEditingController noteCtl = TextEditingController(text: record.notes);
+  Future<void> _showEditRecordSheet(
+      Subject subject, AttendanceRecord record) async {
+    final TextEditingController noteCtl =
+        TextEditingController(text: record.notes);
     await showModalBottomSheet<void>(
       context: context,
       builder: (BuildContext ctx) {
@@ -403,28 +550,32 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text('Edit Attendance Record', style: Theme.of(context).textTheme.titleLarge),
+              Text('Edit Attendance Record',
+                  style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
                 children: <Widget>[
                   OutlinedButton(
                     onPressed: () {
-                      setState(() => record.date = record.date.subtract(const Duration(days: 1)));
+                      setState(() => record.date =
+                          record.date.subtract(const Duration(days: 1)));
                       _saveSubjects();
                     },
                     child: const Text('-1 day'),
                   ),
                   OutlinedButton(
                     onPressed: () {
-                      setState(() => record.date = record.date.subtract(const Duration(days: 3)));
+                      setState(() => record.date =
+                          record.date.subtract(const Duration(days: 3)));
                       _saveSubjects();
                     },
                     child: const Text('-3 days'),
                   ),
                   OutlinedButton(
                     onPressed: () {
-                      setState(() => record.date = record.date.subtract(const Duration(days: 7)));
+                      setState(() => record.date =
+                          record.date.subtract(const Duration(days: 7)));
                       _saveSubjects();
                     },
                     child: const Text('-7 days'),
@@ -483,7 +634,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                   const SizedBox(width: 10),
                   TextButton(
                     onPressed: () {
-                      setState(() => subject.records.removeWhere((r) => r.id == record.id));
+                      setState(() => subject.records
+                          .removeWhere((r) => r.id == record.id));
                       _saveSubjects();
                       Navigator.pop(ctx);
                     },
@@ -538,7 +690,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
 
   Widget _buildDashboard() {
     final int missed = _overallConducted - _overallAttended;
-    final int lagging = _subjects.where((s) => _subjectPercent(s) < s.targetPercentage).length;
+    final int lagging =
+        _subjects.where((s) => _subjectPercent(s) < s.targetPercentage).length;
     return RefreshIndicator(
       onRefresh: _loadSubjects,
       child: ListView(
@@ -547,19 +700,26 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
           Card(
             color: lagging == 0 ? Colors.green.shade50 : Colors.orange.shade50,
             child: ListTile(
-              leading: Icon(lagging == 0 ? Icons.celebration : Icons.warning_amber, size: 30),
+              leading: Icon(
+                  lagging == 0 ? Icons.celebration : Icons.warning_amber,
+                  size: 30),
               title: Text(lagging == 0
                   ? 'Great momentum! All subjects are on target.'
                   : '$lagging subject(s) are currently below target.'),
-              subtitle: const Text('Stay consistent and review advisory hints.'),
+              subtitle:
+                  const Text('Stay consistent and review advisory hints.'),
             ),
           ),
           const SizedBox(height: 8),
           Row(
             children: <Widget>[
-              Expanded(child: _metricCard('Overall', '${_overallPercent().toStringAsFixed(1)}%')),
+              Expanded(
+                  child: _metricCard(
+                      'Overall', '${_overallPercent().toStringAsFixed(1)}%')),
               const SizedBox(width: 8),
-              Expanded(child: _metricCard('Checked', '$_overallAttended / $_overallConducted')),
+              Expanded(
+                  child: _metricCard(
+                      'Checked', '$_overallAttended / $_overallConducted')),
               const SizedBox(width: 8),
               Expanded(child: _metricCard('Missed', '$missed')),
             ],
@@ -586,7 +746,9 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
           children: <Widget>[
             Text(title, style: const TextStyle(fontSize: 13)),
             const SizedBox(height: 6),
-            Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(value,
+                style:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ],
         ),
       ),
@@ -610,8 +772,9 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
-                      Text('${subject.code} • ${subject.name}',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      Text(_subjectDisplay(subject),
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 4),
                       Text(subject.instructor),
                       const SizedBox(height: 4),
@@ -623,7 +786,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                   width: 84,
                   height: 84,
                   child: CustomPaint(
-                    painter: RingProgressPainter(progressPercent: percent, color: subjectColor),
+                    painter: RingProgressPainter(
+                        progressPercent: percent, color: subjectColor),
                     child: Center(
                       child: Text('${percent.toStringAsFixed(0)}%',
                           style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -632,9 +796,12 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                 ),
                 PopupMenuButton<String>(
                   onSelected: (v) {
-                    if (v == 'edit') _showCreateOrEditSubject(existing: subject);
+                    if (v == 'edit') {
+                      _showCreateOrEditSubject(existing: subject);
+                    }
                     if (v == 'delete') {
-                      setState(() => _subjects.removeWhere((s) => s.id == subject.id));
+                      setState(() =>
+                          _subjects.removeWhere((s) => s.id == subject.id));
                       _saveSubjects();
                     }
                     if (v == 'logs') {
@@ -644,10 +811,13 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                       _tabController.animateTo(2);
                     }
                   },
-                  itemBuilder: (BuildContext context) => const <PopupMenuEntry<String>>[
+                  itemBuilder: (BuildContext context) =>
+                      const <PopupMenuEntry<String>>[
                     PopupMenuItem<String>(value: 'edit', child: Text('Edit')),
-                    PopupMenuItem<String>(value: 'delete', child: Text('Delete')),
-                    PopupMenuItem<String>(value: 'logs', child: Text('Jump to logs')),
+                    PopupMenuItem<String>(
+                        value: 'delete', child: Text('Delete')),
+                    PopupMenuItem<String>(
+                        value: 'logs', child: Text('Jump to logs')),
                   ],
                 ),
               ],
@@ -677,7 +847,9 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
               alignment: Alignment.centerLeft,
               child: Text(
                 _advisoryText(subject),
-                style: TextStyle(color: _advisoryColor(subject), fontWeight: FontWeight.w600),
+                style: TextStyle(
+                    color: _advisoryColor(subject),
+                    fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -696,7 +868,9 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text('Semester Trend', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                const Text('Semester Trend',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: 240,
@@ -715,7 +889,14 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                const Text('Course Comparison', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                const Text('Course Comparison',
+                    style:
+                        TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 4),
+                const Text(
+                  'Bars show attendance %, dotted marks show target.',
+                  style: TextStyle(fontSize: 12, color: Colors.black54),
+                ),
                 const SizedBox(height: 8),
                 SizedBox(
                   height: math.max(170, (_subjects.length * 48).toDouble()),
@@ -741,7 +922,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
     logs.sort((a, b) => b.record.date.compareTo(a.record.date));
 
     final List<_LogItem> filtered = logs.where((l) {
-      final bool subjectMatch = _logFilterSubjectId == 'all' || l.subject.id == _logFilterSubjectId;
+      final bool subjectMatch =
+          _logFilterSubjectId == 'all' || l.subject.id == _logFilterSubjectId;
       final bool statusMatch = _logStatusFilter == 'all' ||
           (_logStatusFilter == 'present' && l.record.isPresent) ||
           (_logStatusFilter == 'absent' && !l.record.isPresent);
@@ -758,10 +940,13 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                 child: DropdownButtonFormField<String>(
                   initialValue: _logFilterSubjectId,
                   items: <DropdownMenuItem<String>>[
-                    const DropdownMenuItem<String>(value: 'all', child: Text('All Subjects')),
-                    ..._subjects.map((s) => DropdownMenuItem<String>(value: s.id, child: Text(s.code))),
+                    const DropdownMenuItem<String>(
+                        value: 'all', child: Text('All Subjects')),
+                    ..._subjects.map((s) => DropdownMenuItem<String>(
+                        value: s.id, child: Text(_subjectDisplay(s)))),
                   ],
-                  onChanged: (v) => setState(() => _logFilterSubjectId = v ?? 'all'),
+                  onChanged: (v) =>
+                      setState(() => _logFilterSubjectId = v ?? 'all'),
                   decoration: const InputDecoration(labelText: 'Subject'),
                 ),
               ),
@@ -771,10 +956,13 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
                   initialValue: _logStatusFilter,
                   items: const <DropdownMenuItem<String>>[
                     DropdownMenuItem<String>(value: 'all', child: Text('All')),
-                    DropdownMenuItem<String>(value: 'present', child: Text('Present')),
-                    DropdownMenuItem<String>(value: 'absent', child: Text('Absent')),
+                    DropdownMenuItem<String>(
+                        value: 'present', child: Text('Present')),
+                    DropdownMenuItem<String>(
+                        value: 'absent', child: Text('Absent')),
                   ],
-                  onChanged: (v) => setState(() => _logStatusFilter = v ?? 'all'),
+                  onChanged: (v) =>
+                      setState(() => _logStatusFilter = v ?? 'all'),
                   decoration: const InputDecoration(labelText: 'Status'),
                 ),
               ),
@@ -789,8 +977,10 @@ class _AttendanceHomePageState extends State<AttendanceHomePage> with TickerProv
               final AttendanceRecord r = item.record;
               final Subject s = item.subject;
               return ListTile(
-                leading: CircleAvatar(backgroundColor: colorFromHex(s.colorHex), child: Text(s.code.substring(0, 2))),
-                title: Text('${s.code} • ${s.name}'),
+                leading: CircleAvatar(
+                    backgroundColor: colorFromHex(s.colorHex),
+                    child: Text(_subjectShort(s))),
+                title: Text(_subjectDisplay(s)),
                 subtitle: Text(
                   '${_dateLabel(r.date)} • ${r.isPresent ? "Present" : "Absent"}${r.notes.trim().isEmpty ? "" : " • ${r.notes}"}',
                 ),
@@ -835,12 +1025,14 @@ class RingProgressPainter extends CustomPainter {
       ..strokeWidth = 9
       ..strokeCap = StrokeCap.round;
     final double sweep = (progressPercent.clamp(0, 100) / 100) * 2 * math.pi;
-    canvas.drawArc(Rect.fromCircle(center: center, radius: radius), -math.pi / 2, sweep, false, arc);
+    canvas.drawArc(Rect.fromCircle(center: center, radius: radius),
+        -math.pi / 2, sweep, false, arc);
   }
 
   @override
   bool shouldRepaint(covariant RingProgressPainter oldDelegate) {
-    return oldDelegate.progressPercent != progressPercent || oldDelegate.color != color;
+    return oldDelegate.progressPercent != progressPercent ||
+        oldDelegate.color != color;
   }
 }
 
@@ -854,7 +1046,8 @@ class TrendLinePainter extends CustomPainter {
     const double right = 12;
     const double top = 16;
     const double bottom = 30;
-    final Rect chart = Rect.fromLTWH(left, top, size.width - left - right, size.height - top - bottom);
+    final Rect chart = Rect.fromLTWH(
+        left, top, size.width - left - right, size.height - top - bottom);
     final Paint grid = Paint()..color = Colors.grey.shade300;
     for (int i = 0; i <= 5; i++) {
       final double y = chart.bottom - (chart.height * i / 5);
@@ -864,14 +1057,20 @@ class TrendLinePainter extends CustomPainter {
       final double x = chart.left + (chart.width * i / 5);
       canvas.drawLine(Offset(x, chart.top), Offset(x, chart.bottom), grid);
     }
-    final List<AttendanceRecord> all = subjects.expand((s) => s.records).toList()
+    final List<AttendanceRecord> all = subjects
+        .expand((s) => s.records)
+        .toList()
       ..sort((a, b) => a.date.compareTo(b.date));
     if (all.isEmpty) {
       final tp = TextPainter(
-        text: const TextSpan(text: 'No data', style: TextStyle(color: Colors.black54)),
+        text: const TextSpan(
+            text: 'No data', style: TextStyle(color: Colors.black54)),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(canvas, Offset(size.width / 2 - tp.width / 2, size.height / 2 - tp.height / 2));
+      tp.paint(
+          canvas,
+          Offset(
+              size.width / 2 - tp.width / 2, size.height / 2 - tp.height / 2));
       return;
     }
 
@@ -880,7 +1079,8 @@ class TrendLinePainter extends CustomPainter {
     for (int i = 0; i < all.length; i++) {
       if (all[i].isPresent) present++;
       final double pct = (present / (i + 1)) * 100;
-      final double x = chart.left + (chart.width * i / (all.length - 1 == 0 ? 1 : (all.length - 1)));
+      final double x = chart.left +
+          (chart.width * i / (all.length - 1 == 0 ? 1 : (all.length - 1)));
       final double y = chart.bottom - (chart.height * pct / 100);
       if (i == 0) {
         line.moveTo(x, y);
@@ -897,14 +1097,17 @@ class TrendLinePainter extends CustomPainter {
     );
 
     final TextPainter yLabel = TextPainter(
-      text: const TextSpan(text: 'Attendance %', style: TextStyle(color: Colors.black87, fontSize: 11)),
+      text: const TextSpan(
+          text: 'Attendance %',
+          style: TextStyle(color: Colors.black87, fontSize: 11)),
       textDirection: TextDirection.ltr,
     )..layout();
     yLabel.paint(canvas, const Offset(4, 6));
   }
 
   @override
-  bool shouldRepaint(covariant TrendLinePainter oldDelegate) => oldDelegate.subjects != subjects;
+  bool shouldRepaint(covariant TrendLinePainter oldDelegate) =>
+      oldDelegate.subjects != subjects;
 }
 
 class CourseBarChartPainter extends CustomPainter {
@@ -913,55 +1116,96 @@ class CourseBarChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const double left = 86;
+    const double left = 130;
     const double right = 16;
-    const double top = 10;
+    const double top = 24;
     const double barHeight = 24;
-    const double gap = 20;
+    const double gap = 18;
     final double chartWidth = size.width - left - right;
     final Paint bg = Paint()..color = Colors.grey.shade200;
     final Paint targetLine = Paint()
       ..color = Colors.red.shade400
-      ..strokeWidth = 1.5;
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    final Paint grid = Paint()
+      ..color = Colors.grey.shade300
+      ..strokeWidth = 1;
 
-    for (int i = 0; i < subjects.length; i++) {
-      final Subject s = subjects[i];
+    for (final int tick in <int>[0, 50, 100]) {
+      final double x = left + chartWidth * (tick / 100);
+      canvas.drawLine(Offset(x, top - 14), Offset(x, size.height - 6), grid);
+      final TextPainter tickLabel = TextPainter(
+        text: TextSpan(
+            text: '$tick%',
+            style: const TextStyle(color: Colors.black54, fontSize: 10)),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tickLabel.paint(canvas, Offset(x - (tickLabel.width / 2), 4));
+    }
+
+    final List<Subject> sortedSubjects = List<Subject>.from(subjects)
+      ..sort((a, b) {
+        final double aPct = a.records.isEmpty
+            ? 0
+            : (a.records.where((r) => r.isPresent).length / a.records.length) *
+                100;
+        final double bPct = b.records.isEmpty
+            ? 0
+            : (b.records.where((r) => r.isPresent).length / b.records.length) *
+                100;
+        return bPct.compareTo(aPct);
+      });
+
+    for (int i = 0; i < sortedSubjects.length; i++) {
+      final Subject s = sortedSubjects[i];
       final double pct = s.records.isEmpty
           ? 0
-          : (s.records.where((r) => r.isPresent).length / s.records.length) * 100;
+          : (s.records.where((r) => r.isPresent).length / s.records.length) *
+              100;
       final double y = top + i * (barHeight + gap);
       final Rect bgRect = Rect.fromLTWH(left, y, chartWidth, barHeight);
       canvas.drawRRect(
         RRect.fromRectAndRadius(bgRect, const Radius.circular(8)),
         bg,
       );
-      final Rect fgRect = Rect.fromLTWH(left, y, chartWidth * (pct / 100), barHeight);
+      final Rect fgRect =
+          Rect.fromLTWH(left, y, chartWidth * (pct / 100), barHeight);
       canvas.drawRRect(
         RRect.fromRectAndRadius(fgRect, const Radius.circular(8)),
         Paint()..color = colorFromHex(s.colorHex),
       );
       final double targetX = left + chartWidth * (s.targetPercentage / 100);
-      canvas.drawLine(Offset(targetX, y - 2), Offset(targetX, y + barHeight + 2), targetLine);
+      canvas.drawLine(Offset(targetX, y - 1),
+          Offset(targetX, y + barHeight + 1), targetLine);
 
       final TextPainter label = TextPainter(
-        text: TextSpan(text: s.code, style: const TextStyle(color: Colors.black87, fontSize: 12)),
+        text: TextSpan(
+            text: s.name,
+            style: const TextStyle(color: Colors.black87, fontSize: 11)),
         textDirection: TextDirection.ltr,
-      )..layout();
-      label.paint(canvas, Offset(10, y + 4));
+        maxLines: 2,
+        ellipsis: '...',
+      )..layout(maxWidth: left - 16);
+      label.paint(canvas, Offset(8, y + 4));
 
       final TextPainter pctLabel = TextPainter(
         text: TextSpan(
           text: '${pct.toStringAsFixed(1)}%',
-          style: const TextStyle(color: Colors.black87, fontWeight: FontWeight.w600, fontSize: 12),
+          style: const TextStyle(
+              color: Colors.black87, fontWeight: FontWeight.w600, fontSize: 12),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      pctLabel.paint(canvas, Offset(math.min(left + chartWidth - pctLabel.width, left + chartWidth * (pct / 100) + 6), y + 4));
+      final double preferredX = left + chartWidth * (pct / 100) + 6;
+      final double clampedX =
+          preferredX.clamp(left + 4, left + chartWidth - pctLabel.width);
+      pctLabel.paint(canvas, Offset(clampedX, y + 4));
     }
   }
 
   @override
-  bool shouldRepaint(covariant CourseBarChartPainter oldDelegate) => oldDelegate.subjects != subjects;
+  bool shouldRepaint(covariant CourseBarChartPainter oldDelegate) =>
+      oldDelegate.subjects != subjects;
 }
 
 Color colorFromHex(String hex) {
