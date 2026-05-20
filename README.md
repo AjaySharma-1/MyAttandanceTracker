@@ -21,17 +21,6 @@ Track semester attendance for all your courses in one place. Mark **Attended** o
 > **Note:** All data stays on your device. No account or internet required after install.
 
 ---
-
-## Screenshots
-
-Place your three images in `docs/screenshots/` with these exact names:
-
-| Screen | Save as |
-|--------|---------|
-| Dashboard | `docs/screenshots/dashboard.png` |
-| Charts | `docs/screenshots/charts.png` |
-| Log | `docs/screenshots/logs.png` |
-
 ### Dashboard
 
 Overall attendance, summary cards, per-course progress rings, and quick daily **Attended** / **Absent** buttons.
