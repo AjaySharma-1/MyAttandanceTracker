@@ -2,6 +2,12 @@ import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'models/attendance_record.dart';
+import 'models/subject.dart';
+import 'utils/color_utils.dart';
+import 'utils/date_utils.dart';
+import 'widgets/painters/ring_progress_painter.dart';
+import 'widgets/painters/trend_line_painter.dart';
 
 void main() {
   runApp(const AttendanceTrackerApp());
@@ -35,89 +41,6 @@ class AttendanceTrackerApp extends StatelessWidget {
       home: const AttendanceHomePage(),
     );
   }
-}
-
-String generateUuid() {
-  final math.Random random = math.Random();
-  final int millis = DateTime.now().microsecondsSinceEpoch;
-  String part(int n) => List<int>.generate(n, (_) => random.nextInt(16))
-      .map((v) => v.toRadixString(16))
-      .join();
-  return '${part(8)}-${part(4)}-4${part(3)}-${(8 + random.nextInt(4)).toRadixString(16)}${part(3)}-${millis.toRadixString(16).substring(0, 12)}';
-}
-
-class AttendanceRecord {
-  AttendanceRecord({
-    String? id,
-    required this.date,
-    required this.isPresent,
-    this.notes = '',
-  }) : id = id ?? generateUuid();
-
-  final String id;
-  DateTime date;
-  bool isPresent;
-  String notes;
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-        'id': id,
-        'dateMs': date.millisecondsSinceEpoch,
-        'isPresent': isPresent,
-        'notes': notes,
-      };
-
-  factory AttendanceRecord.fromJson(Map<String, dynamic> json) =>
-      AttendanceRecord(
-        id: json['id'] as String?,
-        date: DateTime.fromMillisecondsSinceEpoch(
-            (json['dateMs'] as num).toInt()),
-        isPresent: (json['isPresent'] as bool?) ?? false,
-        notes: (json['notes'] as String?) ?? '',
-      );
-}
-
-class Subject {
-  Subject({
-    String? id,
-    required this.name,
-    required this.code,
-    required this.instructor,
-    this.targetPercentage = 75,
-    required this.colorHex,
-    List<AttendanceRecord>? records,
-  })  : id = id ?? generateUuid(),
-        records = records ?? <AttendanceRecord>[];
-
-  final String id;
-  String name;
-  String code;
-  String instructor;
-  int targetPercentage;
-  String colorHex;
-  final List<AttendanceRecord> records;
-
-  Map<String, dynamic> toJson() => <String, dynamic>{
-        'id': id,
-        'name': name,
-        'code': code,
-        'instructor': instructor,
-        'targetPercentage': targetPercentage,
-        'colorHex': colorHex,
-        'records': records.map((r) => r.toJson()).toList(),
-      };
-
-  factory Subject.fromJson(Map<String, dynamic> json) => Subject(
-        id: json['id'] as String?,
-        name: (json['name'] as String?) ?? '',
-        code: (json['code'] as String?) ?? '',
-        instructor: (json['instructor'] as String?) ?? '',
-        targetPercentage: (json['targetPercentage'] as num?)?.toInt() ?? 75,
-        colorHex: (json['colorHex'] as String?) ?? '#1F4AA8',
-        records: ((json['records'] as List<dynamic>?) ?? <dynamic>[])
-            .map((dynamic e) =>
-                AttendanceRecord.fromJson(e as Map<String, dynamic>))
-            .toList(),
-      );
 }
 
 class AttendanceHomePage extends StatefulWidget {
@@ -168,6 +91,12 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _loadSubjects();
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSubjects() async {
@@ -541,113 +470,140 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
       Subject subject, AttendanceRecord record) async {
     final TextEditingController noteCtl =
         TextEditingController(text: record.notes);
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (BuildContext ctx) {
-        return Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text('Edit Attendance Record',
-                  style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: <Widget>[
-                  OutlinedButton(
-                    onPressed: () {
-                      setState(() => record.date =
-                          record.date.subtract(const Duration(days: 1)));
-                      _saveSubjects();
-                    },
-                    child: const Text('-1 day'),
-                  ),
-                  OutlinedButton(
-                    onPressed: () {
-                      setState(() => record.date =
-                          record.date.subtract(const Duration(days: 3)));
-                      _saveSubjects();
-                    },
-                    child: const Text('-3 days'),
-                  ),
-                  OutlinedButton(
-                    onPressed: () {
-                      setState(() => record.date =
-                          record.date.subtract(const Duration(days: 7)));
-                      _saveSubjects();
-                    },
-                    child: const Text('-7 days'),
-                  ),
-                  OutlinedButton(
-                    onPressed: () async {
-                      final DateTime? picked = await showDatePicker(
-                        context: context,
-                        firstDate: DateTime(2020),
-                        lastDate: DateTime.now().add(const Duration(days: 365)),
-                        initialDate: record.date,
-                      );
-                      if (picked != null) {
-                        setState(() => record.date = DateTime(
-                              picked.year,
-                              picked.month,
-                              picked.day,
-                              record.date.hour,
-                              record.date.minute,
-                            ));
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (BuildContext sheetContext) {
+        return StatefulBuilder(
+          builder: (BuildContext context, void Function(void Function()) setModalState) {
+            final double keyboardBottom =
+                MediaQuery.viewInsetsOf(context).bottom;
+            return Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + keyboardBottom),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text('Edit Attendance Record',
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                'Session date',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelMedium
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                    ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                dateLabel(record.date),
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.tonal(
+                          onPressed: () async {
+                            final DateTime? picked = await showDatePicker(
+                              context: context,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime.now()
+                                  .add(const Duration(days: 365)),
+                              initialDate: record.date,
+                            );
+                            if (picked != null) {
+                              setModalState(() {
+                                record.date = DateTime(
+                                  picked.year,
+                                  picked.month,
+                                  picked.day,
+                                  record.date.hour,
+                                  record.date.minute,
+                                );
+                              });
+                              _saveSubjects();
+                            }
+                          },
+                          child: const Text('Pick date'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: record.isPresent,
+                      title: const Text('Marked present'),
+                      onChanged: (bool value) {
+                        setModalState(() => record.isPresent = value);
                         _saveSubjects();
-                      }
-                    },
-                    child: const Text('Pick date'),
-                  ),
-                ],
+                      },
+                    ),
+                    TextField(
+                      controller: noteCtl,
+                      minLines: 3,
+                      maxLines: 6,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      decoration: const InputDecoration(
+                        labelText: 'Notes',
+                        alignLabelWithHint: true,
+                      ),
+                      onChanged: (String v) => record.notes = v,
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: <Widget>[
+                        FilledButton(
+                          onPressed: () {
+                            record.notes = noteCtl.text;
+                            _saveSubjects();
+                            Navigator.pop(sheetContext);
+                          },
+                          child: const Text('Done'),
+                        ),
+                        const SizedBox(width: 10),
+                        TextButton(
+                          onPressed: () {
+                            final String removedId = record.id;
+                            Navigator.pop(sheetContext);
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (!mounted) return;
+                              setState(() => subject.records
+                                  .removeWhere((r) => r.id == removedId));
+                              _saveSubjects();
+                            });
+                          },
+                          child: const Text('Delete record'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                value: record.isPresent,
-                title: const Text('Marked Present'),
-                onChanged: (bool value) {
-                  setState(() => record.isPresent = value);
-                  _saveSubjects();
-                },
-              ),
-              TextField(
-                controller: noteCtl,
-                minLines: 2,
-                maxLines: 5,
-                decoration: const InputDecoration(labelText: 'Notes'),
-                onChanged: (v) {
-                  setState(() => record.notes = v);
-                },
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: <Widget>[
-                  FilledButton(
-                    onPressed: () {
-                      _saveSubjects();
-                      Navigator.pop(ctx);
-                    },
-                    child: const Text('Done'),
-                  ),
-                  const SizedBox(width: 10),
-                  TextButton(
-                    onPressed: () {
-                      setState(() => subject.records
-                          .removeWhere((r) => r.id == record.id));
-                      _saveSubjects();
-                      Navigator.pop(ctx);
-                    },
-                    child: const Text('Delete record'),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
+    } finally {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        noteCtl.dispose();
+      });
+    }
   }
 
   @override
@@ -830,6 +786,21 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
                     onPressed: () => _markAttendance(subject, true),
                     icon: const Icon(Icons.check_circle),
                     label: const Text('Attended'),
+                    style: ButtonStyle(
+                      backgroundColor:
+                          WidgetStateProperty.resolveWith<Color>(
+                        (Set<WidgetState> states) {
+                          final ColorScheme scheme =
+                              Theme.of(context).colorScheme;
+                          final Color base = scheme.primary;
+                          if (states.contains(WidgetState.pressed)) {
+                            return Color.lerp(base, Colors.white, 0.45) ??
+                                base;
+                          }
+                          return base;
+                        },
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -997,12 +968,18 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
             children: <Widget>[
               Expanded(
                 child: DropdownButtonFormField<String>(
+                  isExpanded: true,
                   initialValue: _logFilterSubjectId,
                   items: <DropdownMenuItem<String>>[
                     const DropdownMenuItem<String>(
                         value: 'all', child: Text('All Subjects')),
                     ..._subjects.map((s) => DropdownMenuItem<String>(
-                        value: s.id, child: Text(_subjectDisplay(s)))),
+                        value: s.id,
+                        child: Text(
+                          _subjectDisplay(s),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ))),
                   ],
                   onChanged: (v) =>
                       setState(() => _logFilterSubjectId = v ?? 'all'),
@@ -1012,6 +989,7 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
               const SizedBox(width: 8),
               Expanded(
                 child: DropdownButtonFormField<String>(
+                  isExpanded: true,
                   initialValue: _logStatusFilter,
                   items: const <DropdownMenuItem<String>>[
                     DropdownMenuItem<String>(value: 'all', child: Text('All')),
@@ -1041,7 +1019,7 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
                     child: Text(_subjectShort(s))),
                 title: Text(_subjectDisplay(s)),
                 subtitle: Text(
-                  '${_dateLabel(r.date)} • ${r.isPresent ? "Present" : "Absent"}${r.notes.trim().isEmpty ? "" : " • ${r.notes}"}',
+                  '${dateLabel(r.date)} • ${r.isPresent ? "Present" : "Absent"}${r.notes.trim().isEmpty ? "" : " • ${r.notes}"}',
                 ),
                 trailing: IconButton(
                   icon: const Icon(Icons.edit_note),
@@ -1060,218 +1038,4 @@ class _LogItem {
   const _LogItem({required this.subject, required this.record});
   final Subject subject;
   final AttendanceRecord record;
-}
-
-class RingProgressPainter extends CustomPainter {
-  RingProgressPainter({required this.progressPercent, required this.color});
-  final double progressPercent;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final Offset center = Offset(size.width / 2, size.height / 2);
-    final double radius = math.min(size.width, size.height) / 2 - 5;
-
-    final Paint base = Paint()
-      ..color = Colors.grey.shade300
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 9;
-    canvas.drawCircle(center, radius, base);
-
-    final Paint arc = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 9
-      ..strokeCap = StrokeCap.round;
-    final double sweep = (progressPercent.clamp(0, 100) / 100) * 2 * math.pi;
-    canvas.drawArc(Rect.fromCircle(center: center, radius: radius),
-        -math.pi / 2, sweep, false, arc);
-  }
-
-  @override
-  bool shouldRepaint(covariant RingProgressPainter oldDelegate) {
-    return oldDelegate.progressPercent != progressPercent ||
-        oldDelegate.color != color;
-  }
-}
-
-class TrendLinePainter extends CustomPainter {
-  TrendLinePainter(this.subjects);
-  final List<Subject> subjects;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const double left = 42;
-    const double right = 12;
-    const double top = 16;
-    const double bottom = 30;
-    final Rect chart = Rect.fromLTWH(
-        left, top, size.width - left - right, size.height - top - bottom);
-    final Paint grid = Paint()..color = Colors.grey.shade300;
-    for (int i = 0; i <= 5; i++) {
-      final double y = chart.bottom - (chart.height * i / 5);
-      canvas.drawLine(Offset(chart.left, y), Offset(chart.right, y), grid);
-    }
-    for (int i = 0; i <= 5; i++) {
-      final double x = chart.left + (chart.width * i / 5);
-      canvas.drawLine(Offset(x, chart.top), Offset(x, chart.bottom), grid);
-    }
-    final List<AttendanceRecord> all = subjects
-        .expand((s) => s.records)
-        .toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
-    if (all.isEmpty) {
-      final tp = TextPainter(
-        text: const TextSpan(
-            text: 'No data', style: TextStyle(color: Colors.black54)),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(
-          canvas,
-          Offset(
-              size.width / 2 - tp.width / 2, size.height / 2 - tp.height / 2));
-      return;
-    }
-
-    final Path line = Path();
-    int present = 0;
-    for (int i = 0; i < all.length; i++) {
-      if (all[i].isPresent) present++;
-      final double pct = (present / (i + 1)) * 100;
-      final double x = chart.left +
-          (chart.width * i / (all.length - 1 == 0 ? 1 : (all.length - 1)));
-      final double y = chart.bottom - (chart.height * pct / 100);
-      if (i == 0) {
-        line.moveTo(x, y);
-      } else {
-        line.lineTo(x, y);
-      }
-    }
-    canvas.drawPath(
-      line,
-      Paint()
-        ..color = Colors.blue.shade700
-        ..strokeWidth = 3
-        ..style = PaintingStyle.stroke,
-    );
-
-    final TextPainter yLabel = TextPainter(
-      text: const TextSpan(
-          text: 'Attendance %',
-          style: TextStyle(color: Colors.black87, fontSize: 11)),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    yLabel.paint(canvas, const Offset(4, 6));
-  }
-
-  @override
-  bool shouldRepaint(covariant TrendLinePainter oldDelegate) => true;
-}
-
-class CourseBarChartPainter extends CustomPainter {
-  CourseBarChartPainter(this.subjects);
-  final List<Subject> subjects;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const double left = 130;
-    const double right = 16;
-    const double top = 24;
-    const double barHeight = 24;
-    const double gap = 18;
-    final double chartWidth = size.width - left - right;
-    final Paint bg = Paint()..color = Colors.grey.shade200;
-    final Paint targetLine = Paint()
-      ..color = Colors.red.shade400
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-    final Paint grid = Paint()
-      ..color = Colors.grey.shade300
-      ..strokeWidth = 1;
-
-    for (final int tick in <int>[0, 50, 100]) {
-      final double x = left + chartWidth * (tick / 100);
-      canvas.drawLine(Offset(x, top - 14), Offset(x, size.height - 6), grid);
-      final TextPainter tickLabel = TextPainter(
-        text: TextSpan(
-            text: '$tick%',
-            style: const TextStyle(color: Colors.black54, fontSize: 10)),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tickLabel.paint(canvas, Offset(x - (tickLabel.width / 2), 4));
-    }
-
-    final List<Subject> sortedSubjects = List<Subject>.from(subjects)
-      ..sort((a, b) {
-        final double aPct = a.records.isEmpty
-            ? 0
-            : (a.records.where((r) => r.isPresent).length / a.records.length) *
-                100;
-        final double bPct = b.records.isEmpty
-            ? 0
-            : (b.records.where((r) => r.isPresent).length / b.records.length) *
-                100;
-        return bPct.compareTo(aPct);
-      });
-
-    for (int i = 0; i < sortedSubjects.length; i++) {
-      final Subject s = sortedSubjects[i];
-      final double pct = s.records.isEmpty
-          ? 0
-          : (s.records.where((r) => r.isPresent).length / s.records.length) *
-              100;
-      final double y = top + i * (barHeight + gap);
-      final Rect bgRect = Rect.fromLTWH(left, y, chartWidth, barHeight);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(bgRect, const Radius.circular(8)),
-        bg,
-      );
-      final Rect fgRect =
-          Rect.fromLTWH(left, y, chartWidth * (pct / 100), barHeight);
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(fgRect, const Radius.circular(8)),
-        Paint()..color = colorFromHex(s.colorHex),
-      );
-      final double targetX = left + chartWidth * (s.targetPercentage / 100);
-      canvas.drawLine(Offset(targetX, y - 1),
-          Offset(targetX, y + barHeight + 1), targetLine);
-
-      final TextPainter label = TextPainter(
-        text: TextSpan(
-            text: s.name,
-            style: const TextStyle(color: Colors.black87, fontSize: 11)),
-        textDirection: TextDirection.ltr,
-        maxLines: 2,
-        ellipsis: '...',
-      )..layout(maxWidth: left - 16);
-      label.paint(canvas, Offset(8, y + 4));
-
-      final TextPainter pctLabel = TextPainter(
-        text: TextSpan(
-          text: '${pct.toStringAsFixed(1)}%',
-          style: const TextStyle(
-              color: Colors.black87, fontWeight: FontWeight.w600, fontSize: 12),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      final double preferredX = left + chartWidth * (pct / 100) + 6;
-      final double clampedX =
-          preferredX.clamp(left + 4, left + chartWidth - pctLabel.width);
-      pctLabel.paint(canvas, Offset(clampedX, y + 4));
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CourseBarChartPainter oldDelegate) => true;
-}
-
-Color colorFromHex(String hex) {
-  final String value = hex.replaceAll('#', '');
-  final String normalized = value.length == 6 ? 'FF$value' : value;
-  return Color(int.parse(normalized, radix: 16));
-}
-
-String _dateLabel(DateTime d) {
-  String two(int n) => n.toString().padLeft(2, '0');
-  return '${d.year}-${two(d.month)}-${two(d.day)}';
 }
