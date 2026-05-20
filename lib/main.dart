@@ -33,7 +33,7 @@ class AttendanceTrackerApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'My Attendance',
+      title: 'Attendance',
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: Colors.indigo,
@@ -241,6 +241,17 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
 
   bool _sameCalendarDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
+
+  bool _markedPresentToday(Subject subject) {
+    final DateTime now = DateTime.now();
+    return subject.records.any(
+      (AttendanceRecord r) =>
+          _sameCalendarDay(r.date, now) && r.isPresent,
+    );
+  }
+
+  static const Color _attendedMarkedBlue = Color(0xFF90CAF9);
+  static const Color _attendedMarkedBlueText = Color(0xFF0D47A1);
 
   void _markAttendance(Subject subject, bool present) {
     final DateTime now = DateTime.now();
@@ -611,7 +622,7 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
     final double overall = _overallPercent();
     return Scaffold(
       appBar: AppBar(
-        title: Text('My Attendance • ${overall.toStringAsFixed(1)}%'),
+        title: Text('My Attendance : ${overall.toStringAsFixed(1)}%'),
         actions: <Widget>[
           IconButton(
             tooltip: 'Low attendance reminder',
@@ -716,6 +727,7 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
     final int missed = subject.records.length - attended;
     final Color subjectColor = colorFromHex(subject.colorHex);
     final double percent = _subjectPercent(subject);
+    final bool markedPresentToday = _markedPresentToday(subject);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       child: Padding(
@@ -783,21 +795,43 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
               children: <Widget>[
                 Expanded(
                   child: FilledButton.icon(
-                    onPressed: () => _markAttendance(subject, true),
-                    icon: const Icon(Icons.check_circle),
-                    label: const Text('Attended'),
+                    onPressed: markedPresentToday
+                        ? null
+                        : () => _markAttendance(subject, true),
+                    icon: Icon(
+                      markedPresentToday
+                          ? Icons.check_circle
+                          : Icons.check_circle_outlined,
+                    ),
+                    label: Text(
+                      markedPresentToday ? 'Attended today' : 'Attended',
+                    ),
                     style: ButtonStyle(
                       backgroundColor:
                           WidgetStateProperty.resolveWith<Color>(
                         (Set<WidgetState> states) {
-                          final ColorScheme scheme =
-                              Theme.of(context).colorScheme;
-                          final Color base = scheme.primary;
+                          if (markedPresentToday) {
+                            return _attendedMarkedBlue;
+                          }
+                          final Color base =
+                              Theme.of(context).colorScheme.primary;
                           if (states.contains(WidgetState.pressed)) {
-                            return Color.lerp(base, Colors.white, 0.45) ??
-                                base;
+                            return Color.lerp(base, _attendedMarkedBlue, 0.85) ??
+                                _attendedMarkedBlue;
                           }
                           return base;
+                        },
+                      ),
+                      foregroundColor:
+                          WidgetStateProperty.resolveWith<Color>(
+                        (Set<WidgetState> states) {
+                          if (markedPresentToday) {
+                            return _attendedMarkedBlueText;
+                          }
+                          if (states.contains(WidgetState.pressed)) {
+                            return _attendedMarkedBlueText;
+                          }
+                          return Theme.of(context).colorScheme.onPrimary;
                         },
                       ),
                     ),

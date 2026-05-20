@@ -1,6 +1,6 @@
 {
-    "name": "semester_attendance_tracker",
-    "short_name": "semester_attendance_tracker",
+    "name": "Attendance",
+    "short_name": "Attendance",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

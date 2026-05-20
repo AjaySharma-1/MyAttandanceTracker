@@ -65,7 +65,7 @@ class TrendLinePainter extends CustomPainter {
 
     final TextPainter yLabel = TextPainter(
       text: const TextSpan(
-          text: 'Attendance %',
+          text: 'My Attendance %',
           style: TextStyle(color: Colors.black87, fontSize: 11)),
       textDirection: TextDirection.ltr,
     )..layout();
