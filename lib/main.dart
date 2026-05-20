@@ -859,6 +859,8 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
   }
 
   Widget _buildCharts() {
+    final List<Subject> sortedSubjects = List<Subject>.from(_subjects)
+      ..sort((a, b) => _subjectPercent(b).compareTo(_subjectPercent(a)));
     return ListView(
       padding: const EdgeInsets.all(12),
       children: <Widget>[
@@ -898,17 +900,74 @@ class _AttendanceHomePageState extends State<AttendanceHomePage>
                   style: TextStyle(fontSize: 12, color: Colors.black54),
                 ),
                 const SizedBox(height: 8),
-                SizedBox(
-                  height: math.max(170, (_subjects.length * 48).toDouble()),
-                  child: CustomPaint(
-                    painter: CourseBarChartPainter(_subjects),
-                  ),
-                ),
+                if (sortedSubjects.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 16),
+                    child: Text('No subject data yet.'),
+                  )
+                else
+                  ...sortedSubjects.map(_buildComparisonRow),
               ],
             ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildComparisonRow(Subject subject) {
+    final double pct = _subjectPercent(subject);
+    final double target = subject.targetPercentage / 100;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  _subjectDisplay(subject),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('${pct.toStringAsFixed(1)}%'),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              return Stack(
+                children: <Widget>[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: LinearProgressIndicator(
+                      minHeight: 18,
+                      value: pct / 100,
+                      backgroundColor: Colors.grey.shade200,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                          colorFromHex(subject.colorHex)),
+                    ),
+                  ),
+                  Positioned(
+                    left: (constraints.maxWidth * target)
+                        .clamp(0.0, constraints.maxWidth - 2),
+                    top: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 2,
+                      color: Colors.red.shade400,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -1106,8 +1165,7 @@ class TrendLinePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant TrendLinePainter oldDelegate) =>
-      oldDelegate.subjects != subjects;
+  bool shouldRepaint(covariant TrendLinePainter oldDelegate) => true;
 }
 
 class CourseBarChartPainter extends CustomPainter {
@@ -1204,8 +1262,7 @@ class CourseBarChartPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant CourseBarChartPainter oldDelegate) =>
-      oldDelegate.subjects != subjects;
+  bool shouldRepaint(covariant CourseBarChartPainter oldDelegate) => true;
 }
 
 Color colorFromHex(String hex) {
